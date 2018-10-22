@@ -27,6 +27,7 @@ import os
 import sys
 import re
 import zipfile, shutil
+from mako.template import Template
 
 # Compatibility with 3.0, 3.1 and 3.2 not supporting u"" literals
 if sys.version < '3':
@@ -59,7 +60,7 @@ class GeneratorXML:
         for addon in addons:
             try:
                 # skip any file or .svn folder or .git folder
-                if not os.path.isdir(addon) or addon in (".svn", ".git", "zip", ".idea"):
+                if not os.path.isdir(addon) or addon in (".svn", ".git", "zip", ".idea", "temp", "packages", "service."):
                     continue
                 # skip not working plugins
                 if os.path.exists(os.path.join(addon, '__not_working__')):
@@ -122,6 +123,34 @@ class GeneratorZIP:
         self._generate_zip_file()
         print("Finished zipping")
 
+    INDEX_TEMPLATE = r"""<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">
+    <html>
+    <head>
+     <title>Index of</title>
+    </head>
+    <body>
+    <h1>${header}</h1>
+    <table>
+    % for name in names:
+       % if '.zip' in name or '.md5' in name or '.xml' in name:
+            <tr><td><a href="${name}">${name}</a></td></tr>
+       % else:
+            <tr><td><a href="${name}/">${name}</a></td></tr>
+       % endif
+    % endfor
+    </table>
+    </body>
+    </html>
+    """
+
+    EXCLUDED = ['index.html']
+
+    def index(self, dir):
+        fnames = [fname for fname in sorted(os.listdir(dir))
+                  if fname not in self.EXCLUDED]
+        header = os.path.basename(dir)
+        return(Template(self.INDEX_TEMPLATE).render(names=fnames, header=header))
+
     def zipdir(self, path, ziph):
         # ziph is zipfile handle
         for root, dirs, files in os.walk(path):
@@ -145,27 +174,46 @@ class GeneratorZIP:
         for addon in addons:
             try:
                 # skip any file or .svn folder or .git folder
-                if not os.path.isdir(addon) or addon in (".svn", ".git", "zip", ".idea"):
+                if not os.path.isdir(addon) or addon in (".svn", ".git", "zip", ".idea", "temp", "packages", "service."):
                     continue
                 # skip not working plugins
                 if os.path.exists(os.path.join(addon, '__not_working__')):
+                    print('{} Skipped (marked as not working)'.format(addon))
                     continue
+                # create path
                 _path = os.path.join( addon, "addon.xml" )
                 xml = open( _path, "r" ).read()
-                version = re.findall("""version=\"(.*[0-9])\"""", xml)[1]
+                version = re.findall('''version=\"(.*?[0-9])\"''', xml)[1]
                 addon_folder = "zip/" + addon
                 if not os.path.exists(addon_folder):
                     os.makedirs(addon_folder)
                 zipf = zipfile.ZipFile(addon_folder + "/" + addon + "-" + version + ".zip", 'w', zipfile.ZIP_DEFLATED)
                 self.zipdir(addon, zipf)
                 zipf.close()
+                index = self.index(addon_folder)
+                with open(addon_folder + '\\index.html', 'w') as file:
+                    file.write(index)
                 print(_path.replace("\\addon.xml","") + " Success!")
             except Exception as e:
                 print("Exception: %s\r\n" % e)
                 pass
+        index = self.index(os.path.dirname(sys.argv[0]))
+        with open(os.path.dirname(sys.argv[0]) + '\\index.html', 'w') as file:
+            file.write(index)
+        index = self.index(os.path.dirname(sys.argv[0]) + "\\zip")
+        with open(os.path.dirname(sys.argv[0]) + "\\zip" + '\\index.html', 'w') as file:
+            file.write(index)
 
 if ( __name__ == "__main__" ):
+    print("Are you want to delete all .pyc and .pyo files from %s and subdirectories?" % os.getcwd())
+    text = raw_input("Please enter y/n: ")
+    if text == 'y':
+        for parent, dirnames, filenames in os.walk(os.path.dirname(sys.argv[0])):
+            for fn in filenames:
+                if fn.lower().endswith('.pyo') or fn.lower().endswith('.pyc'):
+                    print("Removing " + str(os.path.join(parent, fn)))
+                    os.remove(os.path.join(parent, fn))
     print("Trying to generate addons.xml and addons.md5")
     GeneratorXML()
-    print("\r\nTraying to generate zip addons")
+    print("\r\nTrying to generate zip addons")
     GeneratorZIP()
