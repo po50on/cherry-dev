@@ -1,4 +1,6 @@
 # -*- coding: UTF-8 -*-
+
+
 import re
 import urllib
 import xbmc
@@ -8,9 +10,21 @@ import requests
 import resolveurl
 import sys
 
+reload(sys)
+sys.setdefaultencoding('UTF8')
+
 from ptw.debug import log_exception
 from ptw.libraries import addon_utils as addon
 from ptw.libraries import source_utils, client
+from ptw import PY2
+
+if PY2:
+    from urlparse import urljoin
+else:
+    from url.parse import urljoin
+    class InvalidLink(Exception):
+		pass
+
 
 _pluginName = sys.argv[0].replace('plugin://', '')
 _basePath = "special://home/addons/" + _pluginName + "resources/media/"
@@ -18,7 +32,6 @@ _resourcesPath = xbmc.translatePath(_basePath)
 _default_background = _resourcesPath + "fanart.jpg"
 _base_link = "http://www.animezone.pl/"
 
-s = requests.session()
 
 
 # =########################################################################################################=#
@@ -28,10 +41,10 @@ s = requests.session()
 def CATEGORIES():
     addon.addDir("Szukaj anime", '', mode=1)
     addon.addDir("Alfabetycznie", '', mode=10)
+    addon.addDir("Alfabetyczniefilmy", '', mode=15)
     addon.addDir("Gatunki", '', mode=20)
     addon.addDir("Sezony", '', mode=30)
     addon.addDir("Rankingi", '', mode=40)
-
 
 ############################################################################################################
 # =########################################################################################################=#
@@ -74,7 +87,7 @@ def Wyszukiwanie():
 def Alfabetycznie():
     url = 'http://animezone.pl'
 
-    r = client.request('http://animezone.pl/anime/lista')
+    r = client.request('https://www.animezone.pl/anime/lista')
 
     result = client.parseDOM(r, 'div', attrs={'class': 'btn-group btn-group-xs'})
     linki_litery = client.parseDOM(result, 'a', ret='href')
@@ -85,7 +98,22 @@ def Alfabetycznie():
         addon.addDir(str(litery[counter]), link, mode=3)
         counter += 1
 
+		
+def Alfabetyczniefilmy():
+    url = 'http://animezone.pl'
 
+    r = client.request('https://www.animezone.pl/anime/filmy')
+
+    result = client.parseDOM(r, 'div', attrs={'class': 'btn-group btn-group-xs'})
+    linki_litery = client.parseDOM(result, 'a', ret='href')
+    litery = client.parseDOM(result, 'a')
+    counter = 0
+    for link in linki_litery:
+        link = url + link
+        addon.addDir(str(litery[counter]), link, mode=3)
+        counter += 1
+
+		
 def ListowanieAnime():
     url = params['url']
 
@@ -123,66 +151,47 @@ def ListowanieAnime():
 
 def ListowaniOdcinkow():
     url = params['url']
-
-    try:
-        iconimage = params['iconimage']
-    except:
-        iconimage = ''
-
+    iconimage = params.get('iconimage', '')
+	
     r = client.request(url)
-
-    linki = []
-    nazwy = []
-
     result = client.parseDOM(r, 'table', attrs={'class': 'table table-bordered table-striped table-hover episodes'})
-    test = client.parseDOM(result, 'tr')
-    test = [x for x in test if str(x).startswith("<td class=\"text")]
-    for item in test:
-        link = client.parseDOM(item, 'a', ret='href')
-        nazwa = client.parseDOM(item, 'td', attrs={'class': 'episode-title'})
-        odcinek = client.parseDOM(item, 'strong')[0]
-        if nazwa and link:
-            linki.append(link[0])
-            nazwy.append("Odcinek " + odcinek + " " + nazwa[0])
+    result = client.parseDOM(result, 'tbody')
+    for tr in client.parseDOM(result, 'tr'):
+        link = client.parseDOM(tr, 'a', ret='href')[0]
+        nazwa = client.parseDOM(tr, 'td', attrs={'class': 'episode-title'})[0]
+        odcinek = client.parseDOM(tr, 'strong')[0]
+        lang = client.parseDOM(tr, 'span', ret='class')[0].split()[-1]
+        nazwa = '{ep:02d}. {title} ({lang})'.format(title=nazwa, ep=int(odcinek), lang=lang)
+        addon.addDir(nazwa, urljoin(url, link), mode=5, icon=iconimage)
 
-    counter = 0
-    for link in linki:
-        linki[counter] = 'http://animezone.pl' + str(link).replace("..", "")
-        addon.addDir(str(nazwy[counter]), linki[counter], mode=5, icon=iconimage)
-        counter += 1
-
-
+		
 def WysiwetlanieLinkow():
-    global url
-    global nazwa
-
+    
     url = params['url']
-    r = s.get(url).content
+    name = params['name']
+    with requests.session() as sess:
+        r = sess.get(url).text
+        result = client.parseDOM(r, 'table', attrs={'class': 'table table-bordered table-striped table-hover episode'})
+        result = client.parseDOM(result, 'tbody')
+        for tr in client.parseDOM(result, 'tr'):
+            r = re.search(r'(?is)[^<]*(?:<tr[^]>*>[^<]*)?<td[^>]*>(?P<name>[^<]*)<.*?'
+                          r'<span class="(?:sprites +)?(?P<lang>[^"]*?)(?: +lang)?">.*?'
+                          r'\bdata-\w+="(?P<data>[^"]*)"', tr)
+	if r:
+		name, lang, data = r.group('name', 'lang', 'data')
+        try:
+            host, link = get_epsiode_link(sess, data)
+        except InvalidLink as e:
+                    pass
+        else:
+            name = "[B][COLOR green]{host}:[/COLOR] {name}[/B] ({lang})".format(**locals())
+            addon.addLink(name, link, mode=6)
 
-    nazwa = params['name']
-    results = client.parseDOM(r, 'table', attrs={'class': 'table table-bordered table-striped table-hover episode'})
-    results = client.parseDOM(results, 'td', attrs={'class': 'text-center'})
-    counter = range(-1, len(results) - 1)
-    for zipped in zip(counter, results):
-        results.append(work(zipped))
-    results = [x for x in results if type(x) == tuple]
-    for result in results:
-        addon.addLink(result[0], result[1], mode=6)
-
-
-def work(zipped):
-    counter = zipped[0]
-    result = zipped[1]
-    counter += 1
-
-    try:
-        r = re.findall("""data-.*="([0-9].*)">""", result)[0]
-    except:
-        return 0
-
+					
+def get_epsiode_link(sess, data):
     headers = {
         'Accept': '*/*',
-        'Accept-Language': 'pl,en-US;q=0.7,en;q=0.3',
+        'Accept-Language': 'pl,en-US;q=0.7,en;q=0.3',			  
         'Cache-Control': 'max-age=0',
         'Connection': 'keep-alive',
         'Host': 'www.animezone.pl',
@@ -190,8 +199,7 @@ def work(zipped):
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:59.0) Gecko/20100101 Firefox/59.0',
     }
 
-    verify = s.get('http://animezone.pl/images/statistics.gif', headers=headers)
-
+    verify = sess.get('http://animezone.pl/images/statistics.gif', headers=headers)
     hostDict = resolveurl.relevant_resolvers(order_matters=True)
     hostDict = [i.domains for i in hostDict if not '*' in i.domains]
     hostDict = [i.lower() for i in reduce(lambda x, y: x + y, hostDict)]
@@ -202,7 +210,6 @@ def work(zipped):
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:61.0) Gecko/20100101 Firefox/61.0',
         'Accept': '*/*',
         'Accept-Language': 'pl,en-US;q=0.7,en;q=0.3',
-        'Accept-Encoding': 'gzip, deflate, br',
         'Referer': str(url).replace("http://", "http://www."),
         'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
         'X-Requested-With': 'XMLHttpRequest',
@@ -210,25 +217,26 @@ def work(zipped):
         'Pragma': 'no-cache',
         'Cache-Control': 'no-cache',
     }
-
-    data = {'data': r}
-    response = s.post(str(url).replace("http://", "https://www."), headers=headers, data=data).content
-    link = client.parseDOM(response, 'a', ret='href')
-
+    data = {'data': data}
+    response = sess.post(str(url).replace("http://", "https://www."), headers=headers, data=data).content
     try:
-        if link == '':
-            return 0
-        if str(link[0]).startswith('//'):
-            link[0] = str(link[0]).replace("//", "http://")
-        valid, host = source_utils.is_host_valid(str(link[0]), hostDict)
-        if valid == False:
-            return 0
-        else:
-            nazwa2 = "[COLOR green]" + host + ": [/COLOR]" + nazwa
-            return ("[B]" + str(nazwa2) + "[/B]", str(link[0]))
+        link = client.parseDOM(response, 'a', ret='href')[0]
     except:
+        link = client.parseDOM(response, 'iframe', ret='src')[0]
+
+    if not link:
+        raise InvalidLink('No link')
+    if str(link).startswith('//'):
+        link = str(link).replace("//", "http://")
+    try:		
+    
+        valid, host = source_utils.is_host_valid(str(link), hostDict)
+    except Exception as e:
         log_exception()
-        return 0
+        raise InvalidLink('Exception {!r}'.format(e))
+    if not valid:
+        raise InvalidLink('Invalid host')
+    return host, link
 
 
 def Rankingi(counter):
@@ -317,6 +325,9 @@ elif mode == 6:
 elif mode == 10:
     Alfabetycznie()
 
+elif mode == 15:
+    Alfabetyczniefilmy()
+	
 elif mode == 20:
     addon.addDir("Typ widowni", '', mode=21)
     addon.addDir("Gatunek", '', mode=22)
@@ -327,17 +338,17 @@ elif mode == 21:
     Gatunki('http://www.animezone.pl/gatunki?type=', 0)
 
 elif mode == 22:
-    Gatunki('http://www.animezone.pl/gatunki?species=', 1)
+    Gatunki('http://www.animezone.pl/gatunki?species[]=', 1)
 
 elif mode == 23:
-    Gatunki('http://www.animezone.pl/gatunki?topic=', 2)
+    Gatunki('http://www.animezone.pl/gatunki?topic[]=', 2)
 
 elif mode == 24:
     Gatunki('http://www.animezone.pl/gatunki?years=', 3)
 
 elif mode == 30:
-    counter = 1982
-    while counter <= 2019:
+    counter = 2019
+    while counter > 1982:
         addon.addDir("Sezon Wiosna " + str(counter), 'http://www.animezone.pl/anime/sezony/' + str(counter) + '/wiosna',
                      mode=3)
         addon.addDir("Sezon Lato " + str(counter), 'http://www.animezone.pl/anime/sezony/' + str(counter) + '/lato',
@@ -346,7 +357,7 @@ elif mode == 30:
                      mode=3)
         addon.addDir("Sezon Zima " + str(counter), 'http://www.animezone.pl/anime/sezony/' + str(counter) + '/zima',
                      mode=3)
-        counter += 1
+        counter = counter - 1
 
 elif mode == 40:
     addon.addDir("Ranking ocen", 'http://www.animezone.pl/anime/ranking/ocen', mode=41)
@@ -363,3 +374,4 @@ elif mode == 42:
 
 xbmcplugin.setContent(int(sys.argv[1]), 'movies')
 xbmcplugin.endOfDirectory(int(sys.argv[1]))
+
