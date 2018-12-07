@@ -16,14 +16,14 @@ sys.setdefaultencoding('UTF8')
 from ptw.debug import log_exception
 from ptw.libraries import addon_utils as addon
 from ptw.libraries import source_utils, client
-from ptw import PY2
+#from ptw import PY2
 
-if PY2:
-    from urlparse import urljoin
-else:
-    from url.parse import urljoin
-    class InvalidLink(Exception):
-		pass
+#if PY2:
+#    from urlparse import urljoin
+#else:
+   # from url.parse import urljoin
+#    class InvalidLink(Exception):
+#		pass
 
 
 _pluginName = sys.argv[0].replace('plugin://', '')
@@ -374,4 +374,3 @@ elif mode == 42:
 
 xbmcplugin.setContent(int(sys.argv[1]), 'movies')
 xbmcplugin.endOfDirectory(int(sys.argv[1]))
-
